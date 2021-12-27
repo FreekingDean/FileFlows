@@ -1,4 +1,24 @@
-FROM lsiobase/ubuntu:focal
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:6.0-focal AS build-env
+WORKDIR /app
+
+  # Install pre-requisite packages.
+  # Download the Microsoft repository GPG keys
+  # Register the Microsoft repository GPG keys
+  # Update the list of packages after we added packages.microsoft.com
+RUN apt-get update && \ 
+  apt-get install -y wget apt-transport-https software-properties-common && \
+  wget -q https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb && \
+  dpkg -i packages-microsoft-prod.deb && \
+  apt-get update && \
+  apt-get install -y powershell
+
+COPY ./ ./
+
+# Copy everything else and build
+RUN pwsh ./build/build-plugins.ps1
+
+FROM mcr.microsoft.com/dotnet/sdk:6.0-focal
 
 ############################################################ 
 ### Prepare the docker with ffmpeg and hardware encoders ###
@@ -11,7 +31,7 @@ ENV LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/dri" \
 
 # ffmpeg from jellyfin, a little older but precompiled for us
 RUN apt-get update && \
-    apt install -y wget && \
+    apt install -y wget gnupg && \
     wget https://repo.jellyfin.org/releases/server/ubuntu/versions/jellyfin-ffmpeg/4.3.2-1/jellyfin-ffmpeg_4.3.2-1-focal_amd64.deb && \
     apt install -y \
     ./jellyfin-ffmpeg_4.3.2-1-focal_amd64.deb && \
@@ -26,7 +46,7 @@ RUN curl -s https://repositories.intel.com/graphics/intel-graphics.key | apt-key
     apt-get update && \
     apt-get install -y --no-install-recommends \
     # do the actual intel install
-    intel-media-va-driver-non-free vainfo mesa-va-drivers
+    intel-media-va-driver-non-free vainfo mesa-va-drivers ffmpeg
 
 # install libssl-dev, needed for the asp.net application to run
 RUN apt-get update \
@@ -44,10 +64,10 @@ RUN apt-get update \
 EXPOSE 5000
 
 # copy the deploy file into the app directory
-COPY /deploy /app
+COPY --from=build-env /app/out /app
 
 # set the working directory
 WORKDIR /app
 
 # run the server
-ENTRYPOINT [ "/app/FileFlows", "--urls", "http://*:5000" ]
+ENTRYPOINT [ "dotnet", "/app/FileFlows.dll", "--urls", "http://*:5000" ]
